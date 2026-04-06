@@ -104,6 +104,32 @@ bot.py              ← Telegram bot main entry
 └── pyproject.toml  ← Dependencies
 ```
 
+## Troubleshooting & Development Log
+
+### Known Issue: Bot sends messages but does not receive/reply to updates
+
+All components work independently (Moonshine STT, Ollama LLM, Kokoro TTS, Telegram API send), but the bot **fails to consume incoming messages** via the Telegram polling API. The process stays alive with models loaded (~1.5 GB RAM) but never triggers any handler. No errors are logged — the polling loop silently stalls.
+
+#### What we tried (all failed to fix the polling issue):
+
+| Attempt | Description | Result |
+|---------|-------------|--------|
+| 1 | **Python 3.14 → 3.13 downgrade** | Rebuilt `.venv` with Python 3.13. Suspected asyncio/httpx incompatibility in PTB v22. Same behavior — bot starts, no errors, no message consumption. |
+| 2 | **`Application.run_polling()` fix** | Removed the double-start bug (`app.start()` + `await app.updater.start_polling()`). Made `main()` sync instead of async (since `run_polling()` is not a coroutine). The 409 Conflict went away but messages still not consumed. |
+| 3 | **`asyncio.run()` nested loop fix** | Replaced manual event loop creation with `asyncio.run(main())`. PTB's `__run` internally calls `loop.run_until_complete()` which conflicts with an already-running loop. |
+| 4 | **Raw Bot + `asyncio.run()` per request** | Bypassed `Application` entirely. Wrote `raw_bot.py` that calls `bot.get_updates()` via `asyncio.run()`. Error: "Event loop is closed" — httpx destroys its loop after each `asyncio.run()` returns. |
+| 5 | **`requests`-based sync polling** | Replaced all asyncio with `requests` library (`sync_bot.py`). The bot starts cleanly but `requests.post()` to `getUpdates` hangs indefinitely — same silent stall. |
+| 6 | **`curl` subprocess polling** | Zero Python HTTP — used `subprocess.run(["curl", ...])` for all API calls. The `curl` command works standalone from the terminal but **hangs inside `subprocess.run()`** when called from the bot process. Verified that `curl` connects and completes fine outside Python. |
+
+#### Diagnosis summary:
+
+The root cause appears to be a **silent network hang at the Python process level** on macOS when making long-poll HTTP requests. This affects `httpx` (PTB v22), `requests`, and even `subprocess.run` with `curl`. The same `curl` commands work fine from the terminal outside of Python. This suggests an issue specific to how the Python child process handles network I/O under macOS's network stack, possibly related to asyncio signal handling, file descriptor inheritance, or the macOS application sandbox.
+
+#### Workarounds to investigate:
+- **Option 3: Webhook** — instead of long-polling, run a local HTTPS server (uvicorn/FastAPI) that Telegram pushes updates to. This avoids long-poll entirely because the server receives inbound connections instead of initiating them.
+- **Docker container** — run the bot inside a Docker Linux container where the Python networking stack behaves differently.
+- **Different machine** — test the same codebase on a Linux machine to rule out a macOS-specific issue.
+
 ## Acknowledgements
 
 This project is based on [jesuscopado/local-voice-ai-agent](https://github.com/jesuscopado/local-voice-ai-agent), which created the local voice AI pipeline using FastRTC, Moonshine, and Kokoro. We adapted it for Telegram-based language tutoring with persistent student memory and customizable AGENTS.md personas.
