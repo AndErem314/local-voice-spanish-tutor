@@ -59,7 +59,7 @@ def ogg_to_numpy(ogg_bytes: bytes):
                 Path(p).unlink()
 
 
-async def main():
+def main():
     # Get token
     token = os.environ.get("SPANISH_BOT_TOKEN", "")
     if not token or token == "your-telegram-bot-token":
@@ -119,7 +119,15 @@ async def main():
             return "No pude procesar el audio. \u00bfPuedes intentarlo de nuevo?"
         return engine.full_pipeline(uid, audio_data)
 
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Catch ALL errors."""
+        error = context.error
+        print(f"❌ ERROR: {error!r}")
+        import traceback
+        traceback.print_exc()
+
     async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        print(f"📨 TEXT HANDLER CALLED: {update.message.text}")
         uid = str(update.effective_user.id)
         user_text = update.message.text
         memory.record_session(uid)
@@ -161,49 +169,17 @@ async def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+    app.add_error_handler(error_handler)
 
-    logger.info("Starting bot...")
-    await app.initialize()
-    logger.info("App initialized")
-    await app.start()
-    logger.info("App started, starting polling...")
-
-    await app.updater.start_polling(
+    logger.info("\U0001f680 Spanish Tutor Bot is now LIVE and accepting messages!")
+    app.run_polling(
         poll_interval=0.1,
         timeout=30,
         bootstrap_retries=0,
         drop_pending_updates=True,
     )
-    logger.info("\u2705 Polling started! Bot is listening.")
-    print("\U0001f680 Spanish Tutor Bot is now LIVE and accepting messages!")
-
-    # Keep running
-    stop_event = asyncio.Event()
-    try:
-        await stop_event.wait()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        logger.info("Shutting down...")
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
 
 
 if __name__ == "__main__":
     logger.info("=== Spanish Tutor Bot Launcher ===")
-
-    # Create a fresh, clean event loop - avoids Python 3.13 asyncio bugs
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    try:
-        loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-    finally:
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
-        loop.run_until_complete(asyncio.gather(*asyncio.all_tasks(loop), return_exceptions=True))
-        loop.close()
-        logger.info("Bot closed.")
+    main()
