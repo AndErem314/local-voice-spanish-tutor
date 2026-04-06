@@ -291,6 +291,19 @@ class TutorBot:
 
     # ── Run ─────────────────────────────────────────────────────────────
 
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Log errors."""
+        error = context.error
+        logger.error(f"Error while handling update: {error}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+    async def post_init(self, application: Application):
+        """Called after the app starts."""
+        me = await application.bot.get_me()
+        logger.info(f"✅ Logged in as {me.first_name} (@{me.username})")
+        logger.info("Polling for updates...")
+
     def run(self):
         """Start the Telegram bot."""
         token = self.config.get("bot_token", "")
@@ -298,20 +311,29 @@ class TutorBot:
             logger.error("No bot_token in config.json or BOT_TOKEN env var")
             return
 
+        logger.info(f"Token loaded: {token[:10]}...{token[-4:]}")
         self.app = Application.builder().token(token).build()
-        dp = self.app.dispatcher
 
-        dp.add_handler(CommandHandler("start", self.cmd_start))
-        dp.add_handler(CommandHandler("progress", self.cmd_progress))
-        dp.add_handler(CommandHandler("reset", self.cmd_reset))
-        dp.add_handler(CommandHandler("level", self.cmd_level))
-        dp.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self.handle_voice))
-        dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
+        self.app.add_handler(CommandHandler("start", self.cmd_start))
+        self.app.add_handler(CommandHandler("progress", self.cmd_progress))
+        self.app.add_handler(CommandHandler("reset", self.cmd_reset))
+        self.app.add_handler(CommandHandler("level", self.cmd_level))
+        self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self.handle_voice))
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
+        self.app.add_error_handler(self.error_handler)
 
         logger.info(f"🚀 Spanish Tutor Bot starting ...")
         logger.info(f"Model: {self.config['ollama_model']}")
         logger.info(f"Language: {self.config.get('language_code', 'es')}")
-        self.app.run_polling()
+        
+        try:
+            self.app.run_polling(poll_interval=1.0, timeout=30, bootstrap_retries=5,
+                                 allowed_updates=Update.ALL_TYPES, drop_pending_updates=False,
+                                 close_loop=False)
+        except Exception as e:
+            logger.error(f"Bot crashed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
 
 if __name__ == "__main__":
