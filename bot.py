@@ -24,6 +24,13 @@ class TutorBot:
 
     def __init__(self):
         self.config = load_config()
+        # Override token from language-specific env var
+        # Priority: SPANISH_BOT_TOKEN > PORTUGUESE_BOT_TOKEN > config.json > .env
+        for var in ("SPANISH_BOT_TOKEN", "PORTUGUESE_BOT_TOKEN"):
+            val = os.environ.get(var, "")
+            if val and val != "your-telegram-bot-token":
+                self.config["bot_token"] = val
+                break
         self.memory = StudentMemory(
             str(Path(__file__).parent.parent / "data" / "students.json")
         )
